@@ -5,13 +5,19 @@ const cors = require('cors');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
+const bcrypt = require('bcryptjs');
 
-// 1. Initialize app ONLY ONCE
+// Models & Routes
+const User = require('./models/User');
+const gameRoutes = require('./routes/games');
+const categoryRoutes = require('./routes/categories');
+const authRoutes = require('./routes/auth');
+
+// 1. Initialize app
 const app = express();
 
 // 2. Apply Middleware
 app.use(cors());
-// Set limits here to fix your 'getRawBody' error
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -22,12 +28,6 @@ app.use((req, res, next) => {
 });
 
 // 3. Define routes
-const gameRoutes = require('./routes/games');
-const categoryRoutes = require('./routes/categories');
-const authRoutes = require('./routes/auth');
-const bcrypt = require('bcryptjs');
-const User = require('./models/User');
-
 app.use('/api/games', gameRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/auth', authRoutes);
@@ -89,10 +89,17 @@ app.get('/api/fetch-metadata', async (req, res) => {
 
   // 2. HEAVY PATH (Puppeteer Fallback)
   try {
-    const browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
+    console.log("Puppeteer starting for:", url);
+    const browser = await puppeteer.launch({
+      headless: "new",
+      executablePath: '/usr/bin/chromium', 
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
     
+    // Create new page and navigate
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
+
     const metadata = await page.evaluate(() => {
         return {
             title: document.querySelector('meta[property="og:title"]')?.content || document.title || '',
