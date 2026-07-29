@@ -3,6 +3,7 @@ FROM node:22-bookworm-slim
 
 # 2. Install required system dependencies for Puppeteer
 RUN apt-get update && apt-get install -y \
+    chromium \ 
     wget \
     gnupg \
     unzip \
