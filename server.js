@@ -17,9 +17,21 @@ const authRoutes = require('./routes/auth');
 const app = express();
 
 // 2. Apply Middleware & Security
-// Use the environment variable to restrict access to your specific frontend
+// Explicitly whitelist your allowed origins
+const allowedOrigins = [
+    'http://localhost:5173',
+    'https://bes-gamification-nic7p5c1n-satsu.vercel.app'
+];
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps/curl) or if origin is in allowed list
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));
@@ -118,7 +130,6 @@ app.get('/api/fetch-metadata', async (req, res) => {
     console.error("Critical scraper failure:", error.message);
     return res.json({ title: '', description: '', imageUrl: '' });
   } finally {
-    // This is critical: ensures browser memory is freed even if scraping fails
     if (browser) await browser.close();
   }
 });
