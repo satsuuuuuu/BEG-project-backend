@@ -16,14 +16,20 @@ const authRoutes = require('./routes/auth');
 // 1. Initialize app
 const app = express();
 
-// 2. Apply Middleware
-app.use(cors());
+// 2. Apply Middleware & Security
+// Use the environment variable to restrict access to your specific frontend
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true
+}));
+
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Custom logger middleware
+// Custom logger
 app.use((req, res, next) => {
-    console.log("Incoming request body keys:", Object.keys(req.body || {}));
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
 });
 
@@ -36,7 +42,6 @@ app.use('/api/auth', authRoutes);
 mongoose.connect(process.env.MONGO_URI)
   .then(async () => {
     console.log('Connected to MongoDB');
-    // Seed admin user if not present
     try {
       const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
       const adminPassword = process.env.ADMIN_PASSWORD || 'admin';
@@ -67,7 +72,7 @@ app.get('/api/fetch-metadata', async (req, res) => {
 
   // 1. FAST PATH (Axios)
   try {
-    console.log("--- Attempting Axios scrape for:", url);
+    console.log("Attempting Axios scrape for:", url);
     const { data } = await axios.get(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' },
       timeout: 8000 
@@ -84,19 +89,18 @@ app.get('/api/fetch-metadata', async (req, res) => {
         return res.json(metadata);
     }
   } catch (err) {
-    console.log("Axios failed, switching to Puppeteer:", err.message);
+    console.log("Axios failed, switching to Puppeteer fallback.");
   }
 
-  // 2. HEAVY PATH (Puppeteer Fallback)
+  // 2. HEAVY PATH (Puppeteer)
+  let browser = null;
   try {
-    console.log("Puppeteer starting for:", url);
-    const browser = await puppeteer.launch({
+    console.log("Puppeteer starting...");
+    browser = await puppeteer.launch({
       headless: "new",
-      executablePath: '/usr/bin/chromium', 
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     
-    // Create new page and navigate
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
 
@@ -108,12 +112,14 @@ app.get('/api/fetch-metadata', async (req, res) => {
         };
     });
 
-    await browser.close();
     metadata.imageUrl = getAbsoluteUrl(metadata.imageUrl, url);
     return res.json(metadata);
   } catch (error) {
-    console.error("Critical failure:", error.message);
+    console.error("Critical scraper failure:", error.message);
     return res.json({ title: '', description: '', imageUrl: '' });
+  } finally {
+    // This is critical: ensures browser memory is freed even if scraping fails
+    if (browser) await browser.close();
   }
 });
 
