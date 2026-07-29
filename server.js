@@ -13,20 +13,20 @@ const gameRoutes = require('./routes/games');
 const categoryRoutes = require('./routes/categories');
 const authRoutes = require('./routes/auth');
 
-// 1. Initialize app
 const app = express();
 
-// 2. Apply Middleware & Security
-// Explicitly whitelist your allowed origins
+// --- DYNAMIC CORS CONFIGURATION ---
 const allowedOrigins = [
     'http://localhost:5173',
-    'https://bes-gamification-nic7p5c1n-satsu.vercel.app'
+    'https://bes-gamification.vercel.app'
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps/curl) or if origin is in allowed list
-        if (!origin || allowedOrigins.includes(origin)) {
+        // Allow if no origin (server-to-server) 
+        // OR in allowed list 
+        // OR ends with .vercel.app (Handles all your future deployments)
+        if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));
@@ -45,7 +45,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// 3. Define routes
+// Routes
 app.use('/api/games', gameRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/auth', authRoutes);
@@ -54,6 +54,7 @@ app.use('/api/auth', authRoutes);
 mongoose.connect(process.env.MONGO_URI)
   .then(async () => {
     console.log('Connected to MongoDB');
+    // Admin seeding
     try {
       const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
       const adminPassword = process.env.ADMIN_PASSWORD || 'admin';
@@ -61,11 +62,10 @@ mongoose.connect(process.env.MONGO_URI)
       if (!existing) {
         const hash = await bcrypt.hash(adminPassword, 10);
         await User.create({ email: adminEmail, username: 'admin', passwordHash: hash, role: 'admin' });
-        console.log('Seeded admin user:', adminEmail);
       }
-    } catch (e) { console.error('Seeding admin failed', e.message); }
+    } catch (e) { console.error('Seeding failed'); }
   })
-  .catch(err => console.error('Could not connect to MongoDB:', err));
+  .catch(err => console.error('DB Connection error:', err));
 
 // Helper: Ensure images have absolute paths
 const getAbsoluteUrl = (url, baseUrl) => {
@@ -84,9 +84,8 @@ app.get('/api/fetch-metadata', async (req, res) => {
 
   // 1. FAST PATH (Axios)
   try {
-    console.log("Attempting Axios scrape for:", url);
     const { data } = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' },
+      headers: { 'User-Agent': 'Mozilla/5.0' },
       timeout: 8000 
     });
     const $ = cheerio.load(data);
@@ -95,43 +94,27 @@ app.get('/api/fetch-metadata', async (req, res) => {
       description: $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content') || '',
       imageUrl: $('meta[property="og:image"]').attr('content') || ''
     };
-
     if (metadata.title || metadata.imageUrl) {
         metadata.imageUrl = getAbsoluteUrl(metadata.imageUrl, url);
         return res.json(metadata);
     }
-  } catch (err) {
-    console.log("Axios failed, switching to Puppeteer fallback.");
-  }
+  } catch (err) { console.log("Axios failed, trying Puppeteer."); }
 
   // 2. HEAVY PATH (Puppeteer)
   let browser = null;
   try {
-    console.log("Puppeteer starting...");
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    
+    browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
-
-    const metadata = await page.evaluate(() => {
-        return {
-            title: document.querySelector('meta[property="og:title"]')?.content || document.title || '',
-            description: document.querySelector('meta[property="og:description"]')?.content || document.querySelector('meta[name="description"]')?.content || '',
-            imageUrl: document.querySelector('meta[property="og:image"]')?.content || ''
-        };
-    });
-
+    const metadata = await page.evaluate(() => ({
+        title: document.querySelector('meta[property="og:title"]')?.content || document.title || '',
+        description: document.querySelector('meta[property="og:description"]')?.content || '',
+        imageUrl: document.querySelector('meta[property="og:image"]')?.content || ''
+    }));
     metadata.imageUrl = getAbsoluteUrl(metadata.imageUrl, url);
     return res.json(metadata);
-  } catch (error) {
-    console.error("Critical scraper failure:", error.message);
-    return res.json({ title: '', description: '', imageUrl: '' });
-  } finally {
-    if (browser) await browser.close();
-  }
+  } catch (error) { return res.json({ title: '', description: '', imageUrl: '' });
+  } finally { if (browser) await browser.close(); }
 });
 
 const PORT = process.env.PORT || 5000;
