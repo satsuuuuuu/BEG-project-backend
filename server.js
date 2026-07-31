@@ -18,14 +18,13 @@ const app = express();
 // --- DYNAMIC CORS CONFIGURATION ---
 const allowedOrigins = [
     'http://localhost:5173',
-    'https://bes-gamification.vercel.app'
+    'https://bes-gamification.vercel.app',
+    'https://basiadesgamification.aretian.dpdns.org' // Add your new domain here
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow if no origin (server-to-server) 
-        // OR in allowed list 
-        // OR ends with .vercel.app (Handles all your future deployments)
+
         if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
             callback(null, true);
         } else {
